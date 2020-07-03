@@ -1,9 +1,18 @@
 
+use futures::future::{ Future, FutureExt };
 use std::error::Error;
 use std::os::raw::c_int;
 use std::ptr::null_mut;
+use std::{ thread, time };
 
-const ITIMER_PROF: c_int = 2;
+use signal_hook::iterator::Signals;
+
+use tokio::time::{ delay_for, Duration };
+
+const ITIMER_VIRTUAL: c_int = 1;
+const SIGVTALRM: c_int = 26;
+
+const BLOCK: bool = true;
 
 #[repr(C)]
 #[derive(Clone)]
@@ -24,11 +33,11 @@ extern "C" {
 }
 
 pub struct Alarm {
-    timeout: c_int
+    timeout: i64
 }
 
 impl Alarm {
-    pub fn new(timeout: c_int) -> Self {
+    pub fn new(timeout: i64) -> Self {
         let mut me = Alarm { timeout };
         me.retrigger();
         me
@@ -36,14 +45,17 @@ impl Alarm {
 
     pub fn retrigger(&mut self) {
         let it_interval = Timeval {
-            tv_sec: self.timeout as i64 / 1e6 as i64,
-            tv_usec: self.timeout as i64 % 1e6 as i64,
+            tv_sec: 0,
+            tv_usec: 0,
         };
-        let it_value = it_interval.clone();
+        let it_value = Timeval {
+            tv_sec: self.timeout / 1e6 as i64,
+            tv_usec: self.timeout % 1e6 as i64,
+        };
 
         unsafe {
             setitimer(
-                ITIMER_PROF,
+                ITIMER_VIRTUAL,
                 &mut Itimerval {
                     it_interval,
                     it_value,
@@ -63,7 +75,7 @@ impl Drop for Alarm {
         let it_value = it_interval.clone();
         unsafe {
             setitimer(
-                ITIMER_PROF,
+                ITIMER_VIRTUAL,
                 &mut Itimerval {
                     it_interval,
                     it_value,
@@ -74,6 +86,63 @@ impl Drop for Alarm {
     }
 }
 
-fn main() -> Result<(), Box<dyn Error>> {
+fn background_thread() -> Result<(), Box<dyn Error>> {
+    let s = Signals::new(&[
+            SIGVTALRM,
+            signal_hook::SIGTERM |
+            signal_hook::SIGINT |
+            signal_hook::SIGQUIT
+        ])?;
+    'outer: loop {
+        // Pick up signals that arrived since last time
+        for signal in s.pending() {
+            match signal as c_int {
+                signal_hook::SIGTERM | signal_hook::SIGINT | signal_hook::SIGQUIT => {
+                    break 'outer;
+                },
+                _ => {
+                    println!("something blocked");
+                }
+            }
+        }
+    }
     Ok(())
+}
+
+fn safety(mut me: Alarm) {
+    me.retrigger();
+    tokio::spawn_front(async move {
+        safety(me);
+    });
+}
+
+#[tokio::main]
+async fn main() {
+    std::thread::spawn(|| {
+        match background_thread() {
+            Ok(_) => {},
+            Err(e) => { 
+                println!("background thread had an error {:?}", e);
+            }
+        };
+    });
+    println!("a");
+    // one hundred milliseconds in usec
+    let mut a = Alarm::new(1e5 as i64);
+    tokio::spawn_front(async move {
+        println!("delayed");
+        safety(a);
+    });
+    println!("b");
+    let one_second = time::Duration::from_millis(1000);
+    if BLOCK {
+        thread::sleep(one_second);
+    }
+    let next_turn = time::Duration::from_millis(1);
+    let delay = delay_for(next_turn);
+    let two_seconds = Duration::new(2, 0);
+    delay_for(two_seconds).await;
+    println!("blocking again");
+    thread::sleep(one_second);
+    println!("done");
 }
