@@ -43,6 +43,12 @@ impl Alarm {
         me
     }
 
+    pub fn start(self) {
+        tokio::spawn(async move {
+            safety(self);
+        });
+    }
+
     pub fn retrigger(&mut self) {
         let it_interval = Timeval {
             tv_sec: 0,
@@ -126,23 +132,22 @@ async fn main() {
             }
         };
     });
-    println!("a");
+    println!("Setting up the alarm");
     // one hundred milliseconds in usec
-    let mut a = Alarm::new(1e5 as i64);
-    tokio::spawn_front(async move {
-        println!("delayed");
-        safety(a);
-    });
-    println!("b");
+    let a = Alarm::new(1e5 as i64);
+    a.start();
+    println!("Alarm started.");
+    println!("Blocking");
     let one_second = time::Duration::from_millis(1000);
     if BLOCK {
         thread::sleep(one_second);
     }
-    let next_turn = time::Duration::from_millis(1);
-    let delay = delay_for(next_turn);
+    println!("Blocked.");
+    println!("Cooperatively delaying");
     let two_seconds = Duration::new(2, 0);
     delay_for(two_seconds).await;
-    println!("blocking again");
+    println!("Delayed.");
+    println!("Blocking again");
     thread::sleep(one_second);
-    println!("done");
+    println!("Done blocking.");
 }
