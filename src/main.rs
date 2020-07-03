@@ -12,8 +12,6 @@ use tokio::time::{ delay_for, Duration };
 const ITIMER_VIRTUAL: c_int = 1;
 const SIGVTALRM: c_int = 26;
 
-const BLOCK: bool = true;
-
 #[repr(C)]
 #[derive(Clone)]
 struct Timeval {
@@ -38,12 +36,11 @@ pub struct Alarm {
 
 impl Alarm {
     pub fn new(timeout: i64) -> Self {
-        let mut me = Alarm { timeout };
-        me.retrigger();
-        me
+        Alarm { timeout }
     }
 
-    pub fn start(self) {
+    pub fn start(mut self) {
+        self.retrigger();
         tokio::spawn(async move {
             safety(self);
         });
@@ -138,14 +135,11 @@ async fn main() {
     a.start();
     println!("Alarm started.");
     println!("Blocking");
-    let one_second = time::Duration::from_millis(1000);
-    if BLOCK {
-        thread::sleep(one_second);
-    }
+    let one_second = Duration::from_millis(1000);
+    thread::sleep(one_second);
     println!("Blocked.");
     println!("Cooperatively delaying");
-    let two_seconds = Duration::new(2, 0);
-    delay_for(two_seconds).await;
+    delay_for(one_second).await;
     println!("Delayed.");
     println!("Blocking again");
     thread::sleep(one_second);
