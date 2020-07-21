@@ -1,13 +1,9 @@
 
-use futures::future::{ Future, FutureExt };
 use std::error::Error;
 use std::os::raw::c_int;
 use std::ptr::null_mut;
-use std::{ thread, time };
 
 use signal_hook::iterator::Signals;
-
-use tokio::time::{ delay_for, Duration };
 
 const ITIMER_VIRTUAL: c_int = 1;
 const SIGVTALRM: c_int = 26;
@@ -89,7 +85,7 @@ impl Drop for Alarm {
     }
 }
 
-fn background_thread() -> Result<(), Box<dyn Error>> {
+pub fn background_thread() -> Result<(), Box<dyn Error>> {
     let s = Signals::new(&[
             SIGVTALRM,
             signal_hook::SIGTERM |
@@ -117,31 +113,4 @@ fn safety(mut me: Alarm) {
     tokio::spawn_front(async move {
         safety(me);
     });
-}
-
-#[tokio::main]
-async fn main() {
-    std::thread::spawn(|| {
-        match background_thread() {
-            Ok(_) => {},
-            Err(e) => { 
-                println!("background thread had an error {:?}", e);
-            }
-        };
-    });
-    println!("Setting up the alarm");
-    // one hundred milliseconds in usec
-    let a = Alarm::new(1e5 as i64);
-    a.start();
-    println!("Alarm started.");
-    println!("Blocking");
-    let one_second = Duration::from_millis(1000);
-    thread::sleep(one_second);
-    println!("Blocked.");
-    println!("Cooperatively delaying");
-    delay_for(one_second).await;
-    println!("Delayed.");
-    println!("Blocking again");
-    thread::sleep(one_second);
-    println!("Done blocking.");
 }
